@@ -205,8 +205,8 @@ class City():
         lon_start = coord.find('Долгота:') + len('Долгота:')
         lon_end = lon_start + 12
 
-        self.lat = coord[lat_start:lat_end].replace(' ', '')
-        self.long = coord[lon_start:lon_end].replace(' ', '')
+        self.lat = coord[lat_start:lat_end].replace(' ', '')[:9]
+        self.long = coord[lon_start:lon_end].replace(' ', '')[:9]
 
 
 class Weather():
