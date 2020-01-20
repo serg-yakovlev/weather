@@ -53,10 +53,13 @@ class MainWindow(Gtk.Window):
         close_button.connect("clicked", Gtk.main_quit)
         button_box.pack_start(close_button, True, True, 0)
         self.weather_info_label = Gtk.Label()
-        self.weather_info_label.set_size_request(430, 210)
+        self.weather_info_label.set_size_request(600, 400)
         self.weather_info_label.set_selectable(True)
         self.weather_info_label.set_line_wrap(True)
-        right_box.pack_start(self.weather_info_label, True, True, 0)
+        weather_scroll = Gtk.ScrolledWindow()
+        weather_scroll.set_size_request(600, 400)
+        weather_scroll.add_with_viewport(self.weather_info_label)
+        right_box.pack_start(weather_scroll, True, True, 0)
         self.selection_block = False
 
     def entry_changed(self, entry):
@@ -75,7 +78,7 @@ class MainWindow(Gtk.Window):
             )
         self.selection_block = False
 
-    def set_forecast_text(self, city):
+    def set_forecast_text(self, city, city_orig):
         self.weather_info_label.set_text(
             'Получение данных, прогноз сформируется через несколько секунд'
         )
@@ -86,7 +89,7 @@ class MainWindow(Gtk.Window):
         c.get_yandex_crumbs()
         if (not c.long) or (not c.lat):
             self.weather_info_label.set_text(
-                'Проверьте введенное название города'
+                'Проверьте введенное название города (' + city_orig + ')'
             )
         else:
             w = Weather(c)
@@ -99,8 +102,9 @@ class MainWindow(Gtk.Window):
                 self.weather_info_label.set_text(forecast)
 
     def set_forecast_wiki(self, button):
+        city_orig = self.search_entry.get_text()
         city = self.search_entry.get_text().title()
-        self.set_forecast_text(city)
+        self.set_forecast_text(city, city_orig)
 
     def set_forecast_for_selection(self, selection):
         if not self.selection_block:
@@ -125,7 +129,7 @@ class City():
                            'Safari/537.36')
         }
         url = 'https://ru.wikipedia.org/wiki/' + city_full_name + '#/maplink/0'
-        # print(url)
+        self.url_wiki = url
         result = requests.get(url, headers=ua)
         wiki_html = BeautifulSoup(
             result.text, features="html.parser"
@@ -140,6 +144,7 @@ class City():
                 self.city = self.city + '_(город)'
                 self.get_wiki_html()
             else:
+                self.url_wiki = ''
                 self.lat = None
                 self.long = None
                 return False
@@ -181,7 +186,22 @@ class City():
             ][0]
         except IndexError:
             city_description = ''
-        self.wiki_descr = city_description
+        try:
+            city_description_sec_paragraph = [
+                item.text for item in city_desc_array if compare(
+                    self.city, item.text
+                )
+            ][1]
+        except IndexError:
+            city_description_sec_paragraph = ''
+        if len(city_description) < 1000 and city_description != '':
+            city_description = (
+                city_description + city_description_sec_paragraph
+            )
+        self.wiki_descr = '{0}{1}'.format(
+            city_description[:-1],
+            ' (из Википедии)\n'
+        ) if city_description != '' else ''
 
     def get_coordinates_wiki(self):
         wiki_html = self.wiki_html
@@ -265,8 +285,9 @@ class Weather():
         self.wiki_descr = city.wiki_descr
         self.crumbs = city.crumbs
         self.url = ('https://api.weather.yandex.ru'
-                    '/v1/forecast?lat=') + self.lat + '&lon=' + self.long + '&extra=true'
-        # print(self.url)
+                    '/v1/forecast?lat='
+                    ) + self.lat + '&lon=' + self.long + '&extra=true'
+        self.url_wiki = city.url_wiki
 
     def send_request(self):
         ua_key = {
@@ -340,43 +361,74 @@ class Weather():
                 return 'wrong api'
         except KeyError:
             pass
-        text_header = self.crumbs
-        text_descr = self.wiki_descr
-        text_url = ('url',
-                    self.parsed_string['info']['url'])
-        text_now_header = ('\t\tСейчас: \n')
-        text_condition = (self.get_condition(
-            self.parsed_string['fact']['condition']))
-        text_temp = ('Температура воздуха',
-                     self.parsed_string['fact']['temp'], '*C')
-        text_feel_like = (
-            'Ощущается как', self.parsed_string['fact']['feels_like'], '*C')
+        text_header = '\n\n' + self.crumbs + '\n\n'
+        text_descr = self.wiki_descr + '\n'
+        text_url_yandex = 'Yandex:     ' + self.parsed_string[
+            'info'
+        ]['url'] + '\n'
+        text_url_wiki = 'Wiki:     ' + self.url_wiki + '\n\n'
+        text_now_header = ('\t\tСейчас в городе: \n\n')
+        text_condition = self.get_condition(
+            self.parsed_string['fact']['condition']) + '\n'
+        text_temp = '{0}{1}{2}{3}'.format(
+            'Температура воздуха ', self.parsed_string[
+                'fact'
+            ]['temp'], '*C', '\n'
+        )
+        text_feel_like = '{0}{1}{2}{3}'.format(
+            'Ощущается как ', self.parsed_string[
+                'fact'
+            ]['feels_like'],
+            '*C',
+            '\n'
+        )
         try:
-            text_water = (
-                'Температура воды', self.parsed_string[
+            text_water = '{0}{1}{2}{3}'.format(
+                'Температура воды ', self.parsed_string[
                     'fact'
-                ]['temp_water']
+                ]['temp_water'], '*C',
+                '\n'
             )
-        except Exception:
+        except KeyError:
             text_water = ''
-        text_wind = ('Ветер', str(self.get_wind_direct(self.parsed_string[
-            'fact'
-        ]['wind_dir'])) + ', скорость', self.parsed_string[
-            'fact'
-        ]['wind_speed'], 'м/с, порывы до', self.parsed_string[
-            'fact'
-        ]['wind_gust'], 'м/с')
-        text_pressure = ('Атмосферное давление', self.parsed_string[
-            'fact'
-        ]['pressure_mm'], 'мм. рт. ст.')
-        text_humidity = ('Относительная влажность', str(self.parsed_string[
-            'fact'
-        ]['humidity']) + '%')
+        text_wind = '{0}{1}{2}{3}{4}{5}{6}{7}'.format(
+            'Ветер ',
+            str(self.get_wind_direct(self.parsed_string[
+                'fact'
+            ]['wind_dir'])),
+            ', скорость ',
+            self.parsed_string[
+                'fact'
+            ]['wind_speed'],
+            ' м/с, порывы до ',
+            self.parsed_string[
+                'fact'
+            ]['wind_gust'],
+            ' м/с',
+            '\n'
+        )
+        text_pressure = '{0}{1}{2}{3}'.format(
+            'Атмосферное давление ',
+            self.parsed_string[
+                'fact'
+            ]['pressure_mm'],
+            ' мм. рт. ст.',
+            '\n'
+        )
+        text_humidity = '{0}{1}{2}{3}'.format(
+            'Относительная влажность ',
+            str(self.parsed_string[
+                'fact'
+            ]['humidity']),
+            '%',
+            '\n'
+        )
 
-        full_text = '{0} {1} {2} {3} {4} {5} {6} {7} {8} {9} {10}'.format(
+        full_text = '{0} {1} {2} {3} {4} {5} {6} {7} {8} {9} {10} {11}'.format(
             text_header,
             text_descr,
-            text_url,
+            text_url_yandex,
+            text_url_wiki,
             text_now_header,
             text_condition,
             text_temp,
@@ -394,40 +446,76 @@ class Weather():
         self.parsed_string = json.loads(self.json_str)
         part = ['morning', 'day', 'evening', 'night']
         head = ['утро', 'день', 'вечер', 'ночь']
-        full_text = ('\t\tПрогноз:')
+        full_text = '\t\tПрогноз:\n'
         for p, h in zip(part, head):
-            text_space = ('\n\t\t', h)
-            text_cond = (self.get_condition(self.parsed_string[
-                'forecasts'
-            ][0]['parts'][p]['condition']))
-            # # print(self.parsed_string['forecasts'][0]['parts'])
-            text_temp = ('Температура воздуха', self.parsed_string[
-                'forecasts'
-            ][0]['parts'][p]['temp_avg'], '*C')
-            text_feel_like = ('Ощущается как', self.parsed_string[
-                'forecasts'
-            ][0]['parts'][p]['feels_like'], '*C')
-            try:
-                text_water = ('Температура воды', self.parsed_string[
+            text_space = '{0}{1}{2}'.format('\n\t\t', h, '\n')
+            text_cond = '{0}{1}'.format(
+                self.get_condition(self.parsed_string[
                     'forecasts'
-                ][0]['parts'][p]['temp_water'])
-            except Exception:
+                ][0]['parts'][p]['condition']),
+                '\n'
+            )
+            text_temp = '{0}{1}{2}{3}'.format(
+                'Температура воздуха ',
+                self.parsed_string[
+                    'forecasts'
+                ][0]['parts'][p]['temp_avg'],
+                '*C',
+                '\n'
+            )
+            text_feel_like = '{0}{1}{2}{3}'.format(
+                'Ощущается как ',
+                self.parsed_string[
+                    'forecasts'
+                ][0]['parts'][p]['feels_like'],
+                '*C',
+                '\n'
+            )
+            try:
+                text_water = '{0}{1}{2}{3}'.format(
+                    'Температура воды ',
+                    self.parsed_string[
+                        'forecasts'
+                    ][0]['parts'][p]['temp_water'],
+                    '*C',
+                    '\n'
+                )
+            except KeyError:
                 text_water = ''
-            text_wind = ('Ветер', str(self.get_wind_direct(self.parsed_string[
-                'forecasts'
-            ][0]['parts'][p]['wind_dir'])) + ', скорость', self.parsed_string[
-                'forecasts'
-            ][0]['parts'][p][
-                'wind_speed'
-            ], 'м/с, порывы до', self.parsed_string[
-                'forecasts'
-            ][0]['parts'][p]['wind_gust'], 'м/с')
-            text_pressure = ('Атмосферное давление', self.parsed_string[
-                'forecasts'
-            ][0]['parts'][p]['pressure_mm'], 'мм. рт. ст.')
-            text_humidity = ('Относительная влажность', str(self.parsed_string[
-                'forecasts'
-            ][0]['parts'][p]['humidity']) + '%')
+            text_wind = '{0}{1}{2}{3}{4}{5}{6}{7}'.format(
+                'Ветер ',
+                str(self.get_wind_direct(self.parsed_string[
+                    'forecasts'
+                ][0]['parts'][p]['wind_dir'])),
+                ', скорость ',
+                self.parsed_string[
+                    'forecasts'
+                ][0]['parts'][p][
+                    'wind_speed'
+                ],
+                ' м/с, порывы до ',
+                self.parsed_string[
+                    'forecasts'
+                ][0]['parts'][p]['wind_gust'],
+                ' м/с',
+                '\n'
+            )
+            text_pressure = '{0}{1}{2}{3}'.format(
+                'Атмосферное давление',
+                self.parsed_string[
+                    'forecasts'
+                ][0]['parts'][p]['pressure_mm'],
+                ' мм. рт. ст.',
+                '\n'
+            )
+            text_humidity = '{0}{1}{2}{3}'.format(
+                'Относительная влажность',
+                str(self.parsed_string[
+                    'forecasts'
+                ][0]['parts'][p]['humidity']),
+                '%',
+                '\n'
+            )
             part_text = '{0} {1} {2} {3} {4} {5} {6} {7}'.format(
                 text_space,
                 text_cond,
