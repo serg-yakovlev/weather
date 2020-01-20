@@ -3,6 +3,7 @@ import json
 import cities_id
 from bs4 import BeautifulSoup
 from cities_tree import CitiesTree
+from comparison import compare
 import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk
@@ -59,10 +60,6 @@ class MainWindow(Gtk.Window):
         self.selection_block = False
 
     def entry_changed(self, entry):
-        # if entry.get_text() == '':
-        #    self.weather_info_label.set_text(
-        #        ''
-        #    )
         self.selection_block = True
         selected_cities = []
         for city in self.cities:
@@ -77,40 +74,32 @@ class MainWindow(Gtk.Window):
                 ''
             )
         self.selection_block = False
-        # if self.cities_treeview.city_counter == 0:
-        #    try:
-        #        self.set_forecast_text(entry.get_text())
-        #    except Exception:
-        #        pass
 
     def set_forecast_text(self, city):
         self.weather_info_label.set_text(
             'Получение данных, прогноз сформируется через несколько секунд'
         )
         c = City(city)
-        c.get_coordinates(city)
-        if (not c.long) or (not c.lat):
-            c.get_coordinates_dateandtime(city)
+        c.get_wiki_html()
+        c.get_wiki_descr()
+        c.get_coordinates_dateandtime()
+        c.get_yandex_crumbs()
         if (not c.long) or (not c.lat):
             self.weather_info_label.set_text(
                 'Проверьте введенное название города'
             )
         else:
-            long = c.long
-            lat = c.lat
-        w = Weather(lat, long)
-        w.city_description = c.city_description
-        w.send_request()
-        w.get_json()
-        forecast = w.json_parce_now() + ('\n\n') + w.json_parce_fore()
-        if w.wrong_api:
-            self.weather_info_label.set_text(w.check_api_message)
-        else:
-            self.weather_info_label.set_text(forecast)
-        w.get_city_info()
+            w = Weather(c)
+            w.send_request()
+            w.get_json()
+            forecast = w.json_parce_now() + ('\n\n') + w.json_parce_fore()
+            if w.wrong_api:
+                self.weather_info_label.set_text(w.check_api_message)
+            else:
+                self.weather_info_label.set_text(forecast)
 
     def set_forecast_wiki(self, button):
-        city = self.search_entry.get_text()
+        city = self.search_entry.get_text().title()
         self.set_forecast_text(city)
 
     def set_forecast_for_selection(self, selection):
@@ -124,22 +113,11 @@ class City():
 
     def __init__(self, city):
         self.city = city
+        self.init_city = city
 
-    def get_city_url(self):
-        url = 'https://dateandtime.info/ru/citycoordinates.php?id='
-        # city = input("Город (часть названия): ")
-        cities = cities_id.cities()
-        for c in cities:
-            if self.city.lower() in c.lower():
-                city_url = url + cities[c]
-                self.city_id = cities[c]
-                print(c, city_url)
-                return(city_url)
-        return 'no result'
-
-    def get_coordinates(self, city_full_name):
-        city_full_name = city_full_name.title().replace('Город', 'город')
-        print(city_full_name)
+    def get_wiki_html(self):
+        city_full_name = self.city.title().replace('Город', 'город')
+        # print(city_full_name)
         ua = {
             'User-Agent': ('Mozilla/5.0 (Macintosh; '
                            'Intel Mac OS X 10_8_2) AppleWebKit/537.36 '
@@ -147,42 +125,95 @@ class City():
                            'Safari/537.36')
         }
         url = 'https://ru.wikipedia.org/wiki/' + city_full_name + '#/maplink/0'
+        # print(url)
+        result = requests.get(url, headers=ua)
+        wiki_html = BeautifulSoup(
+            result.text, features="html.parser"
+        )
+        self.wiki_html = wiki_html
+        self.get_coordinates_wiki()
+        try:
+            f_lat = float(self.lat)
+            f_lon = float(self.long)
+        except ValueError:
+            if '_(город)' not in self.city:
+                self.city = self.city + '_(город)'
+                self.get_wiki_html()
+            else:
+                self.lat = None
+                self.long = None
+                return False
+        else:
+            self.wiki_html = wiki_html
+            return True
+
+    def get_yandex_crumbs(self):
+        url = 'https://yandex.by/pogoda?lat={0}&lon={1}'.format(
+            self.lat, self.long
+        )
         print(url)
+        ua = {
+            'User-Agent': ('Mozilla/5.0 (Macintosh; '
+                           'Intel Mac OS X 10_8_2) AppleWebKit/537.36 '
+                           '(KHTML, like Gecko) Chrome/27.0.1453.116 '
+                           'Safari/537.36')
+        }
         result = requests.get(url, headers=ua)
         self.html = BeautifulSoup(
             result.text, features="html.parser"
         )
-        self.city_description = self.html.find_all('p')[0].text
-        # print(self.html)
-        coord_start = str(self.html).find(
+        info = self.html.find_all('span')
+        crumbs = [
+            item.text for item in info if 'class="breadcrumbs__title"' in str(
+                item
+            )
+        ]
+        self.crumbs = str(crumbs)
+
+    def get_wiki_descr(self):
+        wiki_html = self.wiki_html
+        city_desc_array = wiki_html.find_all('p')[:5]
+        try:
+            city_description = [
+                item.text for item in city_desc_array if compare(
+                    self.city, item.text
+                )
+            ][0]
+        except IndexError:
+            city_description = ''
+        self.wiki_descr = city_description
+
+    def get_coordinates_wiki(self):
+        wiki_html = self.wiki_html
+        coord_start = str(wiki_html).find(
             '"wgCoordinates":{'
         ) + len('"wgCoordinates":{')
-        coord_end = str(self.html)[coord_start:].find('}') + coord_start
-        coordinates = str(self.html)[coord_start:coord_end]
-        print(coordinates)
-        lat = coordinates[6:coordinates.find(',')].replace(':', '')
-        long = (coordinates[coordinates.find(
+        coord_end = str(wiki_html)[coord_start:].find('}') + coord_start
+        coordinates = str(wiki_html)[coord_start:coord_end]
+        # print(coordinates)
+        self.lat = coordinates[6:coordinates.find(',')].replace(':', '')
+        self.long = (coordinates[coordinates.find(
             ','
         ) + 7:coordinates.find(',') + 7 + 15])
-        print('!!!!', lat, 'and!!!!!!!!!!', long)
-        try:
-            f_lat = float(lat)
-            f_lon = float(long)
-        except ValueError:
-            if '_(город)' not in city_full_name:
-                self.get_coordinates(city_full_name + '_(город)')
-            else:
-                self.lat = None
-                self.long = None
-        else:
-            self.lat = lat
-            self.long = long
+        # print('!!!!', self.lat, 'and!!!!!!!!!!', self.long)
 
-    def get_coordinates_dateandtime(self, city):
-        url = self.get_city_url()
-        if url == 'no result':
-            return
-        print(url)
+    def find_in_list(self):
+        cities = cities_id.cities()
+        for c in cities:
+            if self.init_city.lower() in c.lower():
+                city_id = cities[c]
+                return city_id
+
+    def get_coordinates_dateandtime(self):
+        print('start')
+        cities = cities_id.cities()
+        print(self.init_city)
+        try:
+            city_id = cities[self.init_city]
+        except KeyError:
+            print('end')
+            return False
+        url = 'https://dateandtime.info/ru/citycoordinates.php?id=' + city_id
         ua = {
             'User-Agent': ('Mozilla/5.0 (Macintosh; '
                            'Intel Mac OS X 10_8_2) AppleWebKit/537.36 '
@@ -197,30 +228,45 @@ class City():
             'десятичных градусах</h2>'
         ) + len('десятичных градусах</h2>')
         coord = str(self.html)[cent_degrees:cent_degrees + 100]
-        print(coord)
+        # print(coord)
         lat_start = coord.find('Широта:') + len('Широта:')
         lat_end = lat_start + 12
-        print('/t/t')
-        print(coord[lat_start:lat_end])
-        print(lat_start)
-        print(lat_end)
+        # print('/t/t')
+        # print(coord[lat_start:lat_end])
+        # print(lat_start)
+        # print(lat_end)
         lon_start = coord.find('Долгота:') + len('Долгота:')
         lon_end = lon_start + 12
 
-        self.lat = coord[lat_start:lat_end].replace(' ', '')[:9]
-        self.long = coord[lon_start:lon_end].replace(' ', '')[:9]
+        lat = coord[lat_start:lat_end].replace(' ', '')[:9]
+        print(lat)
+        long = coord[lon_start:lon_end].replace(' ', '')[:9]
+        print(long)
+        try:
+            f_lat = float(lat)
+            f_lon = float(long)
+        except ValueError:
+            return False
+        else:
+            self.lat = lat
+            print(self.lat)
+            self.long = long
+            print(self.long)
+            return True
 
 
 class Weather():
 
-    def __init__(self, lat, long):
-        self.url = ('https://api.weather.yandex.ru'
-                    '/v1/forecast?lat=') + lat + '&lon=' + long + '&extra=true'
-        print(self.url)
+    def __init__(self, city):
         self.is_result = True
         self.wrong_api = False
-        self.lat = lat
-        self.long = long
+        self.lat = city.lat
+        self.long = city.long
+        self.wiki_descr = city.wiki_descr
+        self.crumbs = city.crumbs
+        self.url = ('https://api.weather.yandex.ru'
+                    '/v1/forecast?lat=') + self.lat + '&lon=' + self.long + '&extra=true'
+        # print(self.url)
 
     def send_request(self):
         ua_key = {
@@ -282,28 +328,6 @@ class Weather():
         }
         return(directions[wind_direct_code])
 
-    def get_city_info(self):
-        url = 'https://yandex.by/pogoda?lat={0}&lon={1}'.format(
-            self.lat, self.long
-        )
-        ua = {
-            'User-Agent': ('Mozilla/5.0 (Macintosh; '
-                           'Intel Mac OS X 10_8_2) AppleWebKit/537.36 '
-                           '(KHTML, like Gecko) Chrome/27.0.1453.116 '
-                           'Safari/537.36')
-        }
-        result = requests.get(url, headers=ua)
-        self.html = BeautifulSoup(
-            result.text, features="html.parser"
-        )
-        info = self.html.find_all('span')
-        crumbs = [
-            item.text for item in info if 'class="breadcrumbs__title"' in str(
-                item
-            )
-        ]
-        return str(crumbs)
-
     def json_parce_now(self):
         self.parsed_string = json.loads(self.json_str)
         try:
@@ -316,8 +340,8 @@ class Weather():
                 return 'wrong api'
         except KeyError:
             pass
-        text_header = self.get_city_info()
-        text_descr = self.city_description
+        text_header = self.crumbs
+        text_descr = self.wiki_descr
         text_url = ('url',
                     self.parsed_string['info']['url'])
         text_now_header = ('\t\tСейчас: \n')
@@ -376,7 +400,7 @@ class Weather():
             text_cond = (self.get_condition(self.parsed_string[
                 'forecasts'
             ][0]['parts'][p]['condition']))
-            # print(self.parsed_string['forecasts'][0]['parts'])
+            # # print(self.parsed_string['forecasts'][0]['parts'])
             text_temp = ('Температура воздуха', self.parsed_string[
                 'forecasts'
             ][0]['parts'][p]['temp_avg'], '*C')
@@ -429,7 +453,7 @@ if __name__ == '__main__':
     #    w.send_request()
     #    w.get_json()
     #    w.json_parce_now()
-    #    print('\n\n')
+    #    # print('\n\n')
     #    w.json_parce_fore()
 
     win = MainWindow()
