@@ -71,7 +71,10 @@ class MainWindow(Gtk.Window):
         self.cities_treeview.fill_store(selected_cities)
 
         if self.cities_treeview.selected_city:
-            self.set_forecast_text(self.cities_treeview.selected_city)
+            self.set_forecast_text(
+                self.cities_treeview.selected_city,
+                self.cities_treeview.selected_city
+            )
         else:
             self.weather_info_label.set_text(
                 ''
@@ -110,7 +113,7 @@ class MainWindow(Gtk.Window):
         if not self.selection_block:
             model, treeiter = selection.get_selected()
             city = model[treeiter][0]
-            self.set_forecast_text(city)
+            self.set_forecast_text(city, city)
 
 
 class City():
@@ -129,7 +132,7 @@ class City():
                            'Safari/537.36')
         }
         url = 'https://ru.wikipedia.org/wiki/' + city_full_name + '#/maplink/0'
-        self.url_wiki = url
+        self.url_wiki = url.replace('#/maplink/0', '')
         result = requests.get(url, headers=ua)
         wiki_html = BeautifulSoup(
             result.text, features="html.parser"
@@ -198,9 +201,11 @@ class City():
             city_description = (
                 city_description + city_description_sec_paragraph
             )
-        self.wiki_descr = '{0}{1}'.format(
+        self.wiki_descr = '{0}{1}{2}{3}'.format(
             city_description[:-1],
-            ' (из Википедии)\n'
+            '\n',
+            '\t' * 16,
+            '(из Википедии)\n'
         ) if city_description != '' else ''
 
     def get_coordinates_wiki(self):
@@ -366,7 +371,7 @@ class Weather():
         text_url_yandex = 'Yandex:     ' + self.parsed_string[
             'info'
         ]['url'] + '\n'
-        text_url_wiki = 'Wiki:     ' + self.url_wiki + '\n\n'
+        text_url_wiki = 'Wiki:           ' + self.url_wiki + '\n\n'
         text_now_header = ('\t\tСейчас в городе: \n\n')
         text_condition = self.get_condition(
             self.parsed_string['fact']['condition']) + '\n'
@@ -501,7 +506,7 @@ class Weather():
                 '\n'
             )
             text_pressure = '{0}{1}{2}{3}'.format(
-                'Атмосферное давление',
+                'Атмосферное давление ',
                 self.parsed_string[
                     'forecasts'
                 ][0]['parts'][p]['pressure_mm'],
@@ -509,7 +514,7 @@ class Weather():
                 '\n'
             )
             text_humidity = '{0}{1}{2}{3}'.format(
-                'Относительная влажность',
+                'Относительная влажность ',
                 str(self.parsed_string[
                     'forecasts'
                 ][0]['parts'][p]['humidity']),
