@@ -99,6 +99,7 @@ class MainWindow(Gtk.Window):
             long = c.long
             lat = c.lat
         w = Weather(lat, long)
+        w.city_description = c.city_description
         w.send_request()
         w.get_json()
         forecast = w.json_parce_now() + ('\n\n') + w.json_parce_fore()
@@ -151,6 +152,7 @@ class City():
         self.html = BeautifulSoup(
             result.text, features="html.parser"
         )
+        self.city_description = self.html.find_all('p')[0].text
         # print(self.html)
         coord_start = str(self.html).find(
             '"wgCoordinates":{'
@@ -315,6 +317,7 @@ class Weather():
         except KeyError:
             pass
         text_header = self.get_city_info()
+        text_descr = self.city_description
         text_url = ('url',
                     self.parsed_string['info']['url'])
         text_now_header = ('\t\tСейчас: \n')
@@ -346,8 +349,9 @@ class Weather():
             'fact'
         ]['humidity']) + '%')
 
-        full_text = '{0} {1} {2} {3} {4} {5} {6} {7} {8} {9}'.format(
+        full_text = '{0} {1} {2} {3} {4} {5} {6} {7} {8} {9} {10}'.format(
             text_header,
+            text_descr,
             text_url,
             text_now_header,
             text_condition,
