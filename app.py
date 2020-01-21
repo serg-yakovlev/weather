@@ -16,24 +16,32 @@ class MainWindow(Gtk.Window):
         self.connection = None
         self.set_position(Gtk.WindowPosition.CENTER)
         self.set_size_request(1000, 500)
-        master_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        master_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.add(master_box)
+
+        api_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        self.api_entry = Gtk.Entry()
+        self.api_from_file()
+
+        self.api_button = Gtk.Button(
+            label='Изменить API-Key для Яндекс.Погоды'
+        )
+        self.api_button.connect('clicked', self.api_editable)
+        api_box.pack_end(self.api_entry, False, True, 0)
+        api_box.pack_end(self.api_button, False, True, 0)
+        master_box.pack_start(api_box, False, True, 0)
         hpaned = Gtk.Paned()
         master_box.add(hpaned)
         left_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         right_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        search_header = Gtk.Label(label='SEARCH CITY')
-        self.forecast_header = Gtk.Label(label='WEATHER FORECAST')
-        left_box.pack_start(search_header, False, True, 0)
         search_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         self.search_entry = Gtk.Entry()
         search_box.pack_start(self.search_entry, False, True, 0)
-        search_button = Gtk.Button(label="Search")
-        search_button.connect('clicked', self.set_forecast_wiki)
-        search_box.pack_start(search_button, False, True, 0)
+        self.search_button = Gtk.Button(label="Получить прогноз")
+        self.search_button.connect('clicked', self.set_forecast_wiki)
+        search_box.pack_start(self.search_button, False, True, 0)
         self.search_entry.connect('changed', self.entry_changed)
         left_box.pack_start(search_box, False, True, 0)
-        right_box.pack_start(self.forecast_header, False, True, 0)
         hpaned.add1(left_box)
         hpaned.add2(right_box)
         cities_tree_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -61,6 +69,34 @@ class MainWindow(Gtk.Window):
         weather_scroll.add_with_viewport(self.weather_info_label)
         right_box.pack_start(weather_scroll, True, True, 0)
         self.selection_block = False
+        self.api_iseditable = False
+        self.api_entry.set_editable(False)
+
+    def api_editable(self, button):
+        if self.api_iseditable:
+            self.api_entry.set_editable(False)
+            self.api_iseditable = False
+            self.api_button.set_label('Изменить API-Key для Яндекс.Погоды: ')
+            with open('api', 'w') as file:
+                file.write(self.api_entry.get_text())
+            if self.search_entry.get_text() == '':
+                self.search_entry.set_text(' ')
+                self.search_entry.grab_focus()
+                self.search_entry.set_text('')
+            else:
+                self.search_entry.grab_focus()
+        else:
+            self.api_entry.set_editable(True)
+            self.api_iseditable = True
+            self.api_button.set_label('ОК')
+            self.api_entry.grab_focus()
+
+    def api_from_file(self):
+        try:
+            with open('api', 'r') as file:
+                self.api_entry.set_text(file.read())
+        except Exception:
+            pass
 
     def entry_changed(self, entry):
         self.selection_block = True
@@ -76,9 +112,7 @@ class MainWindow(Gtk.Window):
                 self.cities_treeview.selected_city
             )
         else:
-            self.weather_info_label.set_text(
-                ''
-            )
+            self.weather_info_label.set_text('')
         self.selection_block = False
 
     def set_forecast_text(self, city, city_orig):
@@ -90,12 +124,12 @@ class MainWindow(Gtk.Window):
         c.get_wiki_descr()
         c.get_coordinates_dateandtime()
         c.get_yandex_crumbs()
-        if (not c.long) or (not c.lat):
+        if (not c.longitude) or (not c.latitude):
             self.weather_info_label.set_text(
                 'Проверьте введенное название города (' + city_orig + ')'
             )
         else:
-            w = Weather(c)
+            w = Weather(c, self.api_entry.get_text())
             w.send_request()
             w.get_json()
             forecast = w.json_parce_now() + ('\n\n') + w.json_parce_fore()
@@ -124,7 +158,6 @@ class City():
 
     def get_wiki_html(self):
         city_full_name = self.city.title().replace('Город', 'город')
-        # print(city_full_name)
         ua = {
             'User-Agent': ('Mozilla/5.0 (Macintosh; '
                            'Intel Mac OS X 10_8_2) AppleWebKit/537.36 '
@@ -140,16 +173,16 @@ class City():
         self.wiki_html = wiki_html
         self.get_coordinates_wiki()
         try:
-            f_lat = float(self.lat)
-            f_lon = float(self.long)
+            f_latitude = float(self.latitude)
+            f_longitude = float(self.longitude)
         except ValueError:
             if '_(город)' not in self.city:
                 self.city = self.city + '_(город)'
                 self.get_wiki_html()
             else:
                 self.url_wiki = ''
-                self.lat = None
-                self.long = None
+                self.latitude = None
+                self.longitude = None
                 return False
         else:
             self.wiki_html = wiki_html
@@ -157,7 +190,7 @@ class City():
 
     def get_yandex_crumbs(self):
         url = 'https://yandex.by/pogoda?lat={0}&lon={1}'.format(
-            self.lat, self.long
+            self.latitude, self.longitude
         )
         print(url)
         ua = {
@@ -176,7 +209,10 @@ class City():
                 item
             )
         ]
-        self.crumbs = str(crumbs)
+        self.crumbs = ''
+        for item in crumbs:
+            self.crumbs += '{0}{1}'.format(' > ', item)
+        self.crumbs = self.crumbs[3:]
 
     def get_wiki_descr(self):
         wiki_html = self.wiki_html
@@ -205,7 +241,7 @@ class City():
             city_description[:-1],
             '\n',
             '\t' * 16,
-            '(из Википедии)\n'
+            '(из википедии)\n'
         ) if city_description != '' else ''
 
     def get_coordinates_wiki(self):
@@ -215,12 +251,10 @@ class City():
         ) + len('"wgCoordinates":{')
         coord_end = str(wiki_html)[coord_start:].find('}') + coord_start
         coordinates = str(wiki_html)[coord_start:coord_end]
-        # print(coordinates)
-        self.lat = coordinates[6:coordinates.find(',')].replace(':', '')
-        self.long = (coordinates[coordinates.find(
+        self.latitude = coordinates[6:coordinates.find(',')].replace(':', '')
+        self.longitude = (coordinates[coordinates.find(
             ','
         ) + 7:coordinates.find(',') + 7 + 15])
-        # print('!!!!', self.lat, 'and!!!!!!!!!!', self.long)
 
     def find_in_list(self):
         cities = cities_id.cities()
@@ -230,13 +264,10 @@ class City():
                 return city_id
 
     def get_coordinates_dateandtime(self):
-        print('start')
         cities = cities_id.cities()
-        print(self.init_city)
         try:
             city_id = cities[self.init_city]
         except KeyError:
-            print('end')
             return False
         url = 'https://dateandtime.info/ru/citycoordinates.php?id=' + city_id
         ua = {
@@ -253,50 +284,46 @@ class City():
             'десятичных градусах</h2>'
         ) + len('десятичных градусах</h2>')
         coord = str(self.html)[cent_degrees:cent_degrees + 100]
-        # print(coord)
-        lat_start = coord.find('Широта:') + len('Широта:')
-        lat_end = lat_start + 12
-        # print('/t/t')
-        # print(coord[lat_start:lat_end])
-        # print(lat_start)
-        # print(lat_end)
+        latitude_start = coord.find('Широта:') + len('Широта:')
+        latitude_end = latitude_start + 12
         lon_start = coord.find('Долгота:') + len('Долгота:')
         lon_end = lon_start + 12
 
-        lat = coord[lat_start:lat_end].replace(' ', '')[:9]
-        print(lat)
-        long = coord[lon_start:lon_end].replace(' ', '')[:9]
-        print(long)
+        latitude = coord[latitude_start:latitude_end].replace(' ', '')[:9]
+        longitude = coord[lon_start:lon_end].replace(' ', '')[:9]
         try:
-            f_lat = float(lat)
-            f_lon = float(long)
+            f_latitude = float(latitude)
+            f_longitude = float(longitude)
         except ValueError:
             return False
         else:
-            self.lat = lat
-            print(self.lat)
-            self.long = long
-            print(self.long)
+            self.latitude = latitude
+            self.longitude = longitude
             return True
 
 
 class Weather():
 
-    def __init__(self, city):
+    def __init__(self, city, api):
+        self.api = api
         self.is_result = True
         self.wrong_api = False
-        self.lat = city.lat
-        self.long = city.long
+        self.latitude = city.latitude
+        self.longitude = city.longitude
         self.wiki_descr = city.wiki_descr
         self.crumbs = city.crumbs
-        self.url = ('https://api.weather.yandex.ru'
-                    '/v1/forecast?lat='
-                    ) + self.lat + '&lon=' + self.long + '&extra=true'
+        self.url = '{0}{1}{2}{3}{4}'.format(
+            'https://api.weather.yandex.ru/v1/forecast?lat=',
+            self.latitude,
+            '&lon=',
+            self.longitude,
+            '&extra=true'
+        )
         self.url_wiki = city.url_wiki
 
     def send_request(self):
         ua_key = {
-            'X-Yandex-API-Key': 'fdf02e4b-968d-4edd-9871-279b7086dde5'
+            'X-Yandex-API-Key': self.api
         }
         self.result = requests.get(self.url, headers=ua_key).text
 
@@ -372,7 +399,7 @@ class Weather():
             'info'
         ]['url'] + '\n'
         text_url_wiki = 'Wiki:           ' + self.url_wiki + '\n\n'
-        text_now_header = ('\t\tСейчас в городе: \n\n')
+        text_now_header = ('\n\t\tПогода сейчас: \n\n')
         text_condition = self.get_condition(
             self.parsed_string['fact']['condition']) + '\n'
         text_temp = '{0}{1}{2}{3}'.format(
@@ -451,7 +478,7 @@ class Weather():
         self.parsed_string = json.loads(self.json_str)
         part = ['morning', 'day', 'evening', 'night']
         head = ['утро', 'день', 'вечер', 'ночь']
-        full_text = '\t\tПрогноз:\n'
+        full_text = '\t\tПрогноз на сегодня:\n'
         for p, h in zip(part, head):
             text_space = '{0}{1}{2}'.format('\n\t\t', h, '\n')
             text_cond = '{0}{1}'.format(
@@ -536,18 +563,6 @@ class Weather():
 
 
 if __name__ == '__main__':
-
-    #    c = City()
-    #    c.get_coordinates()
-    #    long = c.long
-    #    lat = c.lat
-
-    #    w = Weather(lat, long)
-    #    w.send_request()
-    #    w.get_json()
-    #    w.json_parce_now()
-    #    # print('\n\n')
-    #    w.json_parce_fore()
 
     win = MainWindow()
     win.connect("destroy", Gtk.main_quit)

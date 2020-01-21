@@ -11,7 +11,7 @@ class CitiesTree(Gtk.TreeView):
             self.store.append([city])
         super().__init__(model=self.store.filter_new())
         self.set_size_request(200, 200)
-        column_names = ['City']
+        column_names = ['выбрать город']
         for i, col_n in enumerate(column_names):
             column = Gtk.TreeViewColumn(col_n, Gtk.CellRendererText(), text=i)
             column.set_resizable(True)
